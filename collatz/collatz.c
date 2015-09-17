@@ -1,4 +1,5 @@
 /*
+ * Matthew Leeds, CS 426, 2015-9-16, OS Concepts Exercise 3.21
  * This program executes the procedure specified by the Collatz conjecture
  * on a positive integer passed on the command line and prints the resulting
  * sequence from a forked child process. Specifically:
