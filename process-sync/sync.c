@@ -43,34 +43,32 @@ int main(int argc, char** argv) {
 
   // create a number of threads to increase and decrease the count
   int i;
+  sleepAndCount* params[numberOfThreads];
   pthread_t* tids[numberOfThreads];
   pthread_attr_t attr;
   pthread_attr_init(&attr);
   pthread_mutex_init(&mutex, NULL);
-  for (i = 0; i < numberOfThreads / 2; i + 2) {
-
+  for (i = 0; i < numberOfThreads; i += 2) {
     // spawn a thread to increase the count a number of times
-    tids[i] = (pthread_t*)malloc(sizeof(pthread_t));
-    sleepAndCount* param1 = malloc(sizeof(sleepAndCount));
-    param1->nsecSleep = rand() % 1000000000;
-    param1->numberOfIterations = numberOfIterations;
-    pthread_create(tids[i], &attr, increase_count, param1);
+    tids[i] = malloc(sizeof(pthread_t));
+    params[i] = malloc(sizeof(sleepAndCount));
+    params[i]->nsecSleep = (long) rand() % 1000000000;
+    params[i]->numberOfIterations = numberOfIterations;
+    pthread_create(tids[i], &attr, increase_count, params[i]);
 
     // spawn a thread to decrease the count a number of times
-    tids[i+1] = (pthread_t*)malloc(sizeof(pthread_t));
-    sleepAndCount* param2 = malloc(sizeof(sleepAndCount));
-    param2->nsecSleep = rand() % 1000000000;
-    param2->numberOfIterations = numberOfIterations;
-    pthread_create(tids[i+1], &attr, decrease_count, param2);
-
-    free(param1);
-    free(param2);
+    tids[i+1] = malloc(sizeof(pthread_t));
+    params[i+1] = malloc(sizeof(sleepAndCount));
+    params[i+1]->nsecSleep = (long) rand() % 1000000000;
+    params[i+1]->numberOfIterations = numberOfIterations;
+    pthread_create(tids[i+1], &attr, decrease_count, params[i+1]);
   }
-  
+
   // join all the threads and free the pthread_t memory
   for (i = 0; i < numberOfThreads; ++i) {
     pthread_join(*tids[i], NULL);
     free(tids[i]);
+    free(params[i]);
   }
 
   return 0;
@@ -80,7 +78,9 @@ int main(int argc, char** argv) {
 // otherwise decrease available_resources by count and return 0
 void* decrease_count(void* param) {
   struct timespec time;
+  time.tv_sec = 0;
   time.tv_nsec = ((sleepAndCount*)param)->nsecSleep;
+  printf("sleep=%ld\n", time.tv_nsec);
   int count = ((sleepAndCount*)param)->numberOfIterations;
   int i;
   int* ret = malloc(sizeof(int));
@@ -94,7 +94,7 @@ void* decrease_count(void* param) {
       pthread_exit(ret);
     else
       available_resources -= count;
-    printf("tid = %d, decrease, available_resources = %d\n", pthread_self(), available_resources);
+    printf("tid = %d, decrease, available_resources = %d\n", (unsigned)pthread_self(), available_resources);
     // end critical section
     pthread_mutex_unlock(&mutex); // release lock
   }
@@ -104,16 +104,18 @@ void* decrease_count(void* param) {
 // increase available_resources by count
 void* increase_count(void* param) {
   struct timespec time;
+  time.tv_sec = 0;
   time.tv_nsec = ((sleepAndCount*)param)->nsecSleep;
+  printf("sleep=%ld\n", time.tv_nsec);
   int count = ((sleepAndCount*)param)->numberOfIterations;
   int i;
   for (i = 0; i < count; ++i) {
-    pthread_mutex_lock(&mutex); // acquire lock
     nanosleep(&time, NULL);
+    pthread_mutex_lock(&mutex); // acquire lock
     // begin critical section
     // use a mutex lock to prevent a race condition on available_resources
     available_resources += count;
-    printf("tid = %d, increase, available_resources = %d\n", pthread_self(), available_resources);
+    printf("tid = %d, increase, available_resources = %d\n", (unsigned)pthread_self(), available_resources);
     // end critical section
     pthread_mutex_unlock(&mutex); // release lock
   }
