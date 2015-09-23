@@ -49,6 +49,7 @@ int main(int argc, char** argv) {
   pthread_attr_init(&attr);
   pthread_mutex_init(&mutex, NULL);
   for (i = 0; i < numberOfThreads; i += 2) {
+    srand(time(NULL) * (i + 1));
     // spawn a thread to increase the count a number of times
     tids[i] = malloc(sizeof(pthread_t));
     params[i] = malloc(sizeof(sleepAndCount));
@@ -56,6 +57,7 @@ int main(int argc, char** argv) {
     params[i]->numberOfIterations = numberOfIterations;
     pthread_create(tids[i], &attr, increase_count, params[i]);
 
+    srand(time(NULL) * (i + 2));
     // spawn a thread to decrease the count a number of times
     tids[i+1] = malloc(sizeof(pthread_t));
     params[i+1] = malloc(sizeof(sleepAndCount));
@@ -89,17 +91,19 @@ void* decrease_count(void* param) {
   *ret = -1;
   for (i = 0; i < count; ++i) {
     nanosleep(&time, NULL);
-    pthread_mutex_lock(&mutex); // acquire lock
-    // begin critical section
     // use a mutex lock to prevent a race condition on available_resources
-    if (available_resources == 0)
+    pthread_mutex_lock(&mutex);
+    // begin critical section
+    if (available_resources == 0) {
+      pthread_mutex_unlock(&mutex);
       pthread_exit(ret);
-    else
-      available_resources -= count;
-    printf("tid = %d, decrease, available_resources = %d\n",
-           (unsigned)pthread_self(), available_resources);
+    } else {
+      available_resources--;
+      printf("tid = 0x%08x, decrease, available_resources = %d\n",
+             (unsigned)pthread_self(), available_resources);
+    }
     // end critical section
-    pthread_mutex_unlock(&mutex); // release lock
+    pthread_mutex_unlock(&mutex);
   }
   free(ret);
   pthread_exit(0);
@@ -114,14 +118,14 @@ void* increase_count(void* param) {
   int i;
   for (i = 0; i < count; ++i) {
     nanosleep(&time, NULL);
-    pthread_mutex_lock(&mutex); // acquire lock
-    // begin critical section
     // use a mutex lock to prevent a race condition on available_resources
-    available_resources += count;
-    printf("tid = %d, increase, available_resources = %d\n",
+    pthread_mutex_lock(&mutex);
+    // begin critical section
+    available_resources++;
+    printf("tid = 0x%08x, increase, available_resources = %d\n",
            (unsigned)pthread_self(), available_resources);
     // end critical section
-    pthread_mutex_unlock(&mutex); // release lock
+    pthread_mutex_unlock(&mutex);
   }
   pthread_exit(0);
 }
