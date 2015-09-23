@@ -65,11 +65,14 @@ int main(int argc, char** argv) {
   }
 
   // join all the threads and free the pthread_t memory
+  int** ret = malloc(sizeof(int*));
   for (i = 0; i < numberOfThreads; ++i) {
-    pthread_join(*tids[i], NULL);
+    pthread_join(*tids[i], (void**)ret);
+    free(*ret);
     free(tids[i]);
     free(params[i]);
   }
+  free(ret);
 
   return 0;
 }
@@ -80,7 +83,6 @@ void* decrease_count(void* param) {
   struct timespec time;
   time.tv_sec = 0;
   time.tv_nsec = ((sleepAndCount*)param)->nsecSleep;
-  printf("sleep=%ld\n", time.tv_nsec);
   int count = ((sleepAndCount*)param)->numberOfIterations;
   int i;
   int* ret = malloc(sizeof(int));
@@ -94,10 +96,12 @@ void* decrease_count(void* param) {
       pthread_exit(ret);
     else
       available_resources -= count;
-    printf("tid = %d, decrease, available_resources = %d\n", (unsigned)pthread_self(), available_resources);
+    printf("tid = %d, decrease, available_resources = %d\n",
+           (unsigned)pthread_self(), available_resources);
     // end critical section
     pthread_mutex_unlock(&mutex); // release lock
   }
+  free(ret);
   pthread_exit(0);
 }
 
@@ -106,7 +110,6 @@ void* increase_count(void* param) {
   struct timespec time;
   time.tv_sec = 0;
   time.tv_nsec = ((sleepAndCount*)param)->nsecSleep;
-  printf("sleep=%ld\n", time.tv_nsec);
   int count = ((sleepAndCount*)param)->numberOfIterations;
   int i;
   for (i = 0; i < count; ++i) {
@@ -115,7 +118,8 @@ void* increase_count(void* param) {
     // begin critical section
     // use a mutex lock to prevent a race condition on available_resources
     available_resources += count;
-    printf("tid = %d, increase, available_resources = %d\n", (unsigned)pthread_self(), available_resources);
+    printf("tid = %d, increase, available_resources = %d\n",
+           (unsigned)pthread_self(), available_resources);
     // end critical section
     pthread_mutex_unlock(&mutex); // release lock
   }
