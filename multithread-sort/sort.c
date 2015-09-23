@@ -100,8 +100,10 @@ int main(int argc, char** argv) {
   
   // Print the sorted values to stdout
   for (i = 0; i < numValues; ++i) {
-    printf("%d\n", sortedValues[i]);
+    printf("%d", sortedValues[i]);
+    if (i != numValues - 1) printf(", ");
   }
+  printf("\n");
 
   // free memory
   if (sortedValues != values) free(sortedValues);
