@@ -66,7 +66,7 @@ int main(int argc, char** argv) {
     pthread_create(tids[i+1], &attr, decrease_count, params[i+1]);
   }
 
-  // join all the threads and free the pthread_t memory
+  // join all the threads and free memory
   int** ret = malloc(sizeof(int*));
   for (i = 0; i < numberOfThreads; ++i) {
     pthread_join(*tids[i], (void**)ret);
@@ -79,8 +79,9 @@ int main(int argc, char** argv) {
   return 0;
 }
 
-// returns -1 if insufficient resources are available
-// otherwise decrease available_resources by count and return 0
+// return -1 if insufficient resources are available
+// otherwise decrement available_resources thread-safely
+// repeat a number of times on timed intervals
 void* decrease_count(void* param) {
   struct timespec time;
   time.tv_sec = 0;
@@ -109,7 +110,8 @@ void* decrease_count(void* param) {
   pthread_exit(0);
 }
 
-// increase available_resources by count
+// increment available_resources thread-safely
+// repeat a number of times on timed intervals
 void* increase_count(void* param) {
   struct timespec time;
   time.tv_sec = 0;
