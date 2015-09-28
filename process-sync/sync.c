@@ -1,5 +1,5 @@
 /*
- * Matthew Leeds, CS 426, 2015-09-23, OS Concepts Ch.5 Exercise 37
+ * Matthew Leeds, CS 426, 2015-09-28, OS Concepts Ch.5 Exercises 37 and 38
  * This program manages a shared resource across processes without
  * a race condition using a semaphore. Pass it the number of threads
  * to create and the number of iterations each thread will execute
@@ -18,6 +18,7 @@
 #define MAX_RESOURCES 5
 int available_resources = MAX_RESOURCES;
 pthread_mutex_t mutex;
+pthread_cond_t resources_positive;
 
 typedef struct {
   long nsecSleep;
@@ -48,6 +49,7 @@ int main(int argc, char** argv) {
   pthread_attr_t attr;
   pthread_attr_init(&attr);
   pthread_mutex_init(&mutex, NULL);
+  pthread_cond_init(&resources_positive, NULL);
   for (i = 0; i < numberOfThreads; i += 2) {
     srand(time(NULL) * (i + 1));
     // spawn a thread to increase the count a number of times
@@ -75,12 +77,14 @@ int main(int argc, char** argv) {
     free(params[i]);
   }
   free(ret);
+  pthread_mutex_destroy(&mutex);
+  pthread_cond_destroy(&resources_positive);
 
   return 0;
 }
 
-// return -1 if insufficient resources are available
-// otherwise decrement available_resources thread-safely
+// decrement available_resources thread-safely
+// waits if insufficient resources are available
 // repeat a number of times on timed intervals
 void* decrease_count(void* param) {
   struct timespec time;
@@ -96,13 +100,12 @@ void* decrease_count(void* param) {
     pthread_mutex_lock(&mutex);
     // begin critical section
     if (available_resources == 0) {
-      pthread_mutex_unlock(&mutex);
-      pthread_exit(ret);
-    } else {
-      available_resources--;
-      printf("tid = 0x%08x, decrease, available_resources = %d\n",
-             (unsigned)pthread_self(), available_resources);
+      // wait for available_resources to be positive
+      pthread_cond_wait(&resources_positive, &mutex);
     }
+    available_resources--;
+    printf("tid = 0x%08x, decrease, available_resources = %d\n",
+           (unsigned)pthread_self(), available_resources);
     // end critical section
     pthread_mutex_unlock(&mutex);
   }
@@ -124,6 +127,8 @@ void* increase_count(void* param) {
     pthread_mutex_lock(&mutex);
     // begin critical section
     available_resources++;
+    if (available_resources > 0)
+      pthread_cond_signal(&resources_positive);
     printf("tid = 0x%08x, increase, available_resources = %d\n",
            (unsigned)pthread_self(), available_resources);
     // end critical section
