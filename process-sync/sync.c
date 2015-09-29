@@ -69,14 +69,11 @@ int main(int argc, char** argv) {
   }
 
   // join all the threads and free memory
-  int** ret = malloc(sizeof(int*));
   for (i = 0; i < numberOfThreads; ++i) {
-    pthread_join(*tids[i], (void**)ret);
-    free(*ret);
+    pthread_join(*tids[i], NULL);
     free(tids[i]);
     free(params[i]);
   }
-  free(ret);
   pthread_attr_destroy(&attr);
   pthread_mutex_destroy(&mutex);
   pthread_cond_destroy(&resources_positive);
@@ -93,8 +90,6 @@ void* decrease_count(void* param) {
   time.tv_nsec = ((sleepAndCount*)param)->nsecSleep;
   int count = ((sleepAndCount*)param)->numberOfIterations;
   int i;
-  int* ret = malloc(sizeof(int));
-  *ret = -1;
   for (i = 0; i < count; ++i) {
     nanosleep(&time, NULL);
     // use a mutex lock to prevent a race condition on available_resources
@@ -110,7 +105,6 @@ void* decrease_count(void* param) {
     // end critical section
     pthread_mutex_unlock(&mutex);
   }
-  free(ret);
   pthread_exit(0);
 }
 
