@@ -77,6 +77,7 @@ int main(int argc, char** argv) {
     free(params[i]);
   }
   free(ret);
+  pthread_attr_destroy(&attr);
   pthread_mutex_destroy(&mutex);
   pthread_cond_destroy(&resources_positive);
 
