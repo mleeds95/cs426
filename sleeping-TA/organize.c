@@ -1,5 +1,5 @@
 /*
- * Matthew Leeds, CS 426, 2015-09-28, OS Concepts Ch.5 Project 1
+ * Matthew Leeds, CS 426, 2015-10-02, OS Concepts Ch.5 Project 1
  * This program uses process synchronization mechanisms available
  * in pthreads to coordinate students getting help from a TA who
  * sleeps when they're not busy.
@@ -16,10 +16,13 @@
 
 // how many times students alternate between programming and seeking help
 #define NUM_ITERATIONS 10
-pthread_mutex_t mutex;
-sem_t sem;
-int number_waiting;
-int go_home;
+
+pthread_mutex_t help_mutex; // locked when the TA is helping someone
+pthread_mutex_t count_mutex; // protects number_waiting changes
+sem_t TA_sem; // 0 when the TA is sleeping
+sem_t student_sem; // -1 * the nmuber of students waiting
+int number_waiting; // the number of students waiting
+int go_home; // the main thread sets this to 1 to send the TA home
 
 // this will be passed to each new student thread
 typedef struct {
@@ -43,15 +46,17 @@ int main(int argc, char** argv) {
     return 2;
   }
   
-  // initialize the semaphore
-  sem_init(&sem, 0, 0);
+  // initialize things
+  sem_init(&TA_sem, 0, 0);
+  sem_init(&student_sem, 0, 0);
   number_waiting = 0;
   go_home = 0;
-
-  // make a thread for the TA
   pthread_attr_t attr;
   pthread_attr_init(&attr);
-  pthread_mutex_init(&mutex, NULL);
+  pthread_mutex_init(&help_mutex, NULL);
+  pthread_mutex_init(&count_mutex, NULL);
+
+  // make a thread for the TA
   pthread_t tid_TA;
   pthread_create(&tid_TA, &attr, simulate_TA, NULL);
 
@@ -68,9 +73,6 @@ int main(int argc, char** argv) {
     pthread_create(tid_students[i], &attr, simulate_student, params[i]);
   }
   
-  // wait for all the students to get help
-  while (number_waiting != 0) ;
-
   // join the threads and free memory
   for (i = 0; i < numberOfStudents; ++i) {
     pthread_join(*tid_students[i], NULL);
@@ -78,10 +80,13 @@ int main(int argc, char** argv) {
     free(params[i]);
   }
   go_home = 1; // tell the TA to go home
+  sem_post(&TA_sem); // wake up the TA if necessary
   pthread_join(tid_TA, NULL);
   pthread_attr_destroy(&attr);
-  pthread_mutex_destroy(&mutex);
-  sem_destroy(&sem);
+  pthread_mutex_destroy(&help_mutex);
+  pthread_mutex_destroy(&count_mutex);
+  sem_destroy(&TA_sem);
+  sem_destroy(&student_sem);
 
   return 0;
 }
@@ -91,19 +96,25 @@ void* simulate_TA(void* param) {
   struct timespec time;
   time.tv_sec = 0;
   time.tv_nsec = (long) rand() % 1000000000;
-  while (!go_home) {
-    if (number_waiting == 0) {
-      printf("tid = 0x%08x, TA sleeping, number_waiting = %d\n",
-             (unsigned)pthread_self(), number_waiting);
-      sem_wait(&sem); // sleep
-    }
+  while (1) {
+    printf("tid = 0x%08x, TA sleeping, number_waiting = %d\n",
+           (unsigned)pthread_self(), number_waiting);
+    sem_wait(&TA_sem); // sleep
+    if (go_home) break; // main thread woke us up
+    printf("tid = 0x%08x, TA awake, number_waiting = %d\n",
+           (unsigned)pthread_self(), number_waiting);
+    // help a student
+    pthread_mutex_lock(&help_mutex);
+    sem_post(&student_sem);
+    // decrement number_waiting
+    pthread_mutex_lock(&count_mutex);
+    number_waiting--;
+    pthread_mutex_unlock(&count_mutex);
     // help for a time
     printf("tid = 0x%08x, TA helping student, number_waiting = %d\n",
            (unsigned)pthread_self(), number_waiting);
     nanosleep(&time, NULL);
-    pthread_mutex_lock(&mutex);
-    number_waiting--;
-    pthread_mutex_unlock(&mutex);
+    pthread_mutex_unlock(&help_mutex);
   }
   pthread_exit(0);
 }
@@ -120,18 +131,24 @@ void* simulate_student(void* param) {
            (unsigned)pthread_self(), number_waiting);
     nanosleep(&time, NULL);
     // if all the chairs are full, keep programming
-    while (number_waiting == 3) {
+    pthread_mutex_lock(&count_mutex);
+    if (number_waiting >= 3) {
       printf("tid = 0x%08x, student waiting for chair, number_waiting = %d\n",
              (unsigned)pthread_self(), number_waiting);
-      nanosleep(&time, NULL);
+      pthread_mutex_unlock(&count_mutex);
+    } else {
+      number_waiting++;
+      pthread_mutex_unlock(&count_mutex);
+      // wake up the TA if necessary
+      sem_post(&TA_sem);
+      // wait in line
+      printf("tid = 0x%08x, student waiting for TA, number_waiting = %d\n",
+             (unsigned)pthread_self(), number_waiting);
+      sem_wait(&student_sem);
+      // when we can lock help_mutex it means they're finished helping us
+      pthread_mutex_lock(&help_mutex);
+      pthread_mutex_unlock(&help_mutex);
     }
-    pthread_mutex_lock(&mutex);
-    number_waiting++;
-    pthread_mutex_unlock(&mutex);
-    // wait in line or wake up the TA if necessary
-    printf("tid = 0x%08x, student waiting for TA, number_waiting = %d\n",
-           (unsigned)pthread_self(), number_waiting);
-    sem_post(&sem);
   }
   pthread_exit(0);
 }
