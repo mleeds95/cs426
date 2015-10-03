@@ -77,12 +77,16 @@ int main() {
         continue;
       } else if (args[0][0] == '!') {
         // execute a command from the history
-        if (strcmp(args[0], "!!") == 0) {// load last command into args
+        if (strcmp(args[0], "!!") == 0) { // load last command into args
           if (historyLength == 0) {
             printf("Error: no commands in history\n");
             continue;
           } else {
-            line = history[(historyLength - 1) % 10];
+            // allocate a new line with the contents of the historical entry
+            // so we don't double free
+            free(line);
+            line = malloc(MAX_LINE);
+            strcpy(line, history[(historyLength - 1) % 10]);
             printf("%s", line);
             free(*line_copy_ptr);
             background = process_line(line, args, line_copy_ptr);
@@ -95,7 +99,11 @@ int main() {
             printf("Error: %d outside of history range\n", n);
             continue;
           } else {
-            line = history[(n - 1) % 10];
+            // allocate a new line with the contents of the historical entry
+            // so we don't double free
+            free(line);
+            line = malloc(MAX_LINE);
+            strcpy(line, history[(n - 1) % 10]);
             printf("%s", line);
             free(*line_copy_ptr);
             background = process_line(line, args, line_copy_ptr);
@@ -122,6 +130,7 @@ int main() {
         return 2;
       }
     } else { // fgets failed, so exit (usually EOF)
+      free(line);
       printf("\n");
       should_run = false;
     }
