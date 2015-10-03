@@ -34,22 +34,30 @@ int main() {
   
   // allocate space to hold address malloc'd by process_line
   char** line_copy_ptr = malloc(sizeof(char *));
+  *line_copy_ptr = NULL;
+  char* line = NULL; // for each line of input
+  bool real_command = false; // true if a system command is executed, not a shell one
 
   // This while loop is the shell's prompt.
   while (should_run) {
+    // free memory from last loop
+    free(*line_copy_ptr);
+    if (!real_command) free(line);
+
+    real_command = false;
+    line = malloc(MAX_LINE); // for next inputted line
     // Due to spaces betweens args, this array will fit them all.
     char* args[MAX_LINE/2 + 1] = {(char *) NULL};
+    bool background = false; // if true, run process concurrently
+
     printf("osh>");
     fflush(stdout);
-    char* line = malloc(MAX_LINE); // the inputted line
-    bool background = false; // if true, run process concurrently
+
     if (fgets(line, MAX_LINE, stdin)) {
       if (strchr(line, '\n') == NULL) {
         fprintf(stderr, "Maximum line length %d exceeded\n", MAX_LINE);
-        free(line);
         continue;
       } else if (strlen(line) == 1) { // just newline character
-        free(line);
         continue;
       } else { // parse the arguments
         background = process_line(line, args, line_copy_ptr);
@@ -58,26 +66,20 @@ int main() {
       // Check if it's a shell command or a system one.
       if (strcmp(args[0], "exit") == 0) {
         should_run = false;
-        free(*line_copy_ptr);
-        free(line);
         break;
       } else if (strcmp(args[0], "history") == 0) {
-        //print history from most to least recent
+        // print history from most to least recent
         int i;
         int lowerLimit = (historyLength - 10) >= 0 ? (historyLength - 10) : 0;
         for (i = historyLength - 1; i >= lowerLimit; --i) {
           printf("%d %s", i+1, history[i % 10]);
         }
-        free(*line_copy_ptr);
-        free(line);
         continue;
       } else if (args[0][0] == '!') {
-        //execute a command from the history
+        // execute a command from the history
         if (strcmp(args[0], "!!") == 0) {// load last command into args
           if (historyLength == 0) {
             printf("Error: no commands in history\n");
-            free(*line_copy_ptr);
-            free(line);
             continue;
           } else {
             line = history[(historyLength - 1) % 10];
@@ -91,7 +93,6 @@ int main() {
           int min = (historyLength <= 10) ? 1 : (historyLength - 9);
           if (n < min || n > historyLength) {
             printf("Error: %d outside of history range\n", n);
-            free(*line_copy_ptr);
             continue;
           } else {
             line = history[(n - 1) % 10];
@@ -102,6 +103,7 @@ int main() {
         }
       }
 
+      real_command = true; // line won't be freed on the next loop
       // add command to history
       if (historyLength >= HIST_LENGTH) free(history[historyLength % HIST_LENGTH]);
       history[historyLength++ % HIST_LENGTH] = line;
@@ -119,9 +121,7 @@ int main() {
         fprintf(stderr, "Fork failed!\n");
         return 2;
       }
-      free(*line_copy_ptr);
     } else { // fgets failed, so exit (usually EOF)
-      free(line);
       printf("\n");
       should_run = false;
     }
