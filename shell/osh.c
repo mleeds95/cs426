@@ -54,7 +54,6 @@ int main() {
 
       // Check if it's a shell command or a system one.
       if (strcmp(args[0], "exit") == 0) {
-        printf("args[0]=_%s_\n",args[0]);
         should_run = false;
         free(line);
         break;
