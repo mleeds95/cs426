@@ -19,7 +19,7 @@
 #define HIST_LENGTH 10
 
 void print_motd();
-bool process_line(char* line, char** processed_args);
+bool process_line(char* line, char** processed_args, char** line_copy_ptr);
 
 int main() {
   // message of the day
@@ -31,11 +31,14 @@ int main() {
 
   // We will set should_run to false to exit the shell.
   bool should_run = true;
+  
+  // allocate space to hold address malloc'd by process_line
+  char** line_copy_ptr = malloc(sizeof(char *));
 
   // This while loop is the shell's prompt.
   while (should_run) {
     // Due to spaces betweens args, this array will fit them all.
-    char* args[MAX_LINE/2 + 1] = {NULL};
+    char* args[MAX_LINE/2 + 1] = {(char *) NULL};
     printf("osh>");
     fflush(stdout);
     char* line = malloc(MAX_LINE); // the inputted line
@@ -48,13 +51,14 @@ int main() {
       } else if (strlen(line) == 1) { // just newline character
         free(line);
         continue;
-      } else {
-        background = process_line(line, args);
+      } else { // parse the arguments
+        background = process_line(line, args, line_copy_ptr);
       }
 
       // Check if it's a shell command or a system one.
       if (strcmp(args[0], "exit") == 0) {
         should_run = false;
+        free(*line_copy_ptr);
         free(line);
         break;
       } else if (strcmp(args[0], "history") == 0) {
@@ -64,6 +68,7 @@ int main() {
         for (i = historyLength - 1; i >= lowerLimit; --i) {
           printf("%d %s", i+1, history[i % 10]);
         }
+        free(*line_copy_ptr);
         free(line);
         continue;
       } else if (args[0][0] == '!') {
@@ -71,22 +76,28 @@ int main() {
         if (strcmp(args[0], "!!") == 0) {// load last command into args
           if (historyLength == 0) {
             printf("Error: no commands in history\n");
+            free(*line_copy_ptr);
+            free(line);
             continue;
           } else {
             line = history[(historyLength - 1) % 10];
             printf("%s", line);
-            background = process_line(line, args);
+            free(*line_copy_ptr);
+            background = process_line(line, args, line_copy_ptr);
           }
         } else { // command is !<number>
           args[0][0] = '0'; // overwrite !
           int n = atoi(args[0]);
-          if (n < 1 || n > historyLength) {
+          int min = (historyLength <= 10) ? 1 : (historyLength - 9);
+          if (n < min || n > historyLength) {
             printf("Error: %d outside of history range\n", n);
+            free(*line_copy_ptr);
             continue;
           } else {
             line = history[(n - 1) % 10];
             printf("%s", line);
-            background = process_line(line, args);
+            free(*line_copy_ptr);
+            background = process_line(line, args, line_copy_ptr);
           }
         }
       }
@@ -99,6 +110,7 @@ int main() {
       pid_t pid = fork();
       if (pid == 0) { // child process
         execvp(args[0], args);
+        // execvp replaces the process image, so if we make it past that the command failed
         printf("%s: command not found\n", args[0]);
         return -1; // exit child process w/ non-zero code
       } else if (pid > 0) { // parent process
@@ -107,13 +119,20 @@ int main() {
         fprintf(stderr, "Fork failed!\n");
         return 2;
       }
-    } else { // usually EOF, so exit
+      free(*line_copy_ptr);
+    } else { // fgets failed, so exit (usually EOF)
       free(line);
       printf("\n");
       should_run = false;
     }
+  } // end while
+
+  // free memory
+  int i;
+  for (i = 0; i < HIST_LENGTH; ++i) {
+    free(history[i]);
   }
-  //TODO free memory in history
+  free(line_copy_ptr);
 
   return 0;
 }
@@ -134,27 +153,23 @@ void print_motd() {
 }
 
 // parse a line of input into arguments
-bool process_line(char* line, char** args) {
-  char line_copy[MAX_LINE];
+bool process_line(char* line, char** args, char** line_copy_ptr) {
+  char* line_copy = malloc(MAX_LINE);
+  *line_copy_ptr = line_copy;
   strcpy(line_copy, line);
-  if (strchr(line_copy, ' ') == NULL) { // just one arg
-    args[0] = line_copy;
-    args[0][strlen(args[0])-1] = '\0'; // chop off newline character
-  } else { // arguments need tokenization
-    char* token = strtok(line_copy, " ");
-    int i;
-    for (i = 0; i <= MAX_LINE/2; ++i) {
-      if (token == NULL) {
-        args[i-1][strlen(args[i-1])-1] = '\0'; // chop off newline character
-        break;
-      }
-      args[i] = token;
-      token = strtok(NULL, " ");
+  char* token = strtok(line_copy, " ");
+  int i = 0;
+  for (; i <= MAX_LINE/2; ++i) {
+    if (token == NULL) {
+      args[i-1][strlen(args[i-1])-1] = '\0'; // chop off newline character
+      break;
     }
-    if (strcmp(args[i-1], "&") == 0) {
-      args[i-1] = NULL;
-      return true;
-    }
+    args[i] = token;
+    token = strtok(NULL, " ");
+  }
+  if (strcmp(args[i-1], "&") == 0) { // will be a background process
+    args[i-1] = NULL;
+    return true;
   }
   return false;
 }
