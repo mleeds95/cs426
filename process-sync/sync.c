@@ -19,6 +19,7 @@
 int available_resources = MAX_RESOURCES;
 pthread_mutex_t mutex;
 pthread_cond_t resources_positive;
+pthread_cond_t resources_under_limit;
 
 typedef struct {
   long nsecSleep;
@@ -50,15 +51,8 @@ int main(int argc, char** argv) {
   pthread_attr_init(&attr);
   pthread_mutex_init(&mutex, NULL);
   pthread_cond_init(&resources_positive, NULL);
+  pthread_cond_init(&resources_under_limit, NULL);
   for (i = 0; i < numberOfThreads; i += 2) {
-    srand(time(NULL) * (i + 1));
-    // spawn a thread to increase the count a number of times
-    tids[i] = malloc(sizeof(pthread_t));
-    params[i] = malloc(sizeof(sleepAndCount));
-    params[i]->nsecSleep = (long) rand() % 1000000000;
-    params[i]->numberOfIterations = numberOfIterations;
-    pthread_create(tids[i], &attr, increase_count, params[i]);
-
     srand(time(NULL) * (i + 2));
     // spawn a thread to decrease the count a number of times
     tids[i+1] = malloc(sizeof(pthread_t));
@@ -66,6 +60,14 @@ int main(int argc, char** argv) {
     params[i+1]->nsecSleep = (long) rand() % 1000000000;
     params[i+1]->numberOfIterations = numberOfIterations;
     pthread_create(tids[i+1], &attr, decrease_count, params[i+1]);
+
+    srand(time(NULL) * (i + 1));
+    // spawn a thread to increase the count a number of times
+    tids[i] = malloc(sizeof(pthread_t));
+    params[i] = malloc(sizeof(sleepAndCount));
+    params[i]->nsecSleep = (long) rand() % 1000000000;
+    params[i]->numberOfIterations = numberOfIterations;
+    pthread_create(tids[i], &attr, increase_count, params[i]);
   }
 
   // join all the threads and free memory
@@ -77,6 +79,7 @@ int main(int argc, char** argv) {
   pthread_attr_destroy(&attr);
   pthread_mutex_destroy(&mutex);
   pthread_cond_destroy(&resources_positive);
+  pthread_cond_destroy(&resources_under_limit);
 
   return 0;
 }
@@ -100,6 +103,8 @@ void* decrease_count(void* param) {
       pthread_cond_wait(&resources_positive, &mutex);
     }
     available_resources--;
+    if (available_resources == MAX_RESOURCES - 1)
+      pthread_cond_signal(&resources_under_limit);
     printf("tid = 0x%08x, decrease, available_resources = %d\n",
            (unsigned)pthread_self(), available_resources);
     // end critical section
@@ -121,6 +126,8 @@ void* increase_count(void* param) {
     // use a mutex lock to prevent a race condition on available_resources
     pthread_mutex_lock(&mutex);
     // begin critical section
+    if (available_resources == MAX_RESOURCES)
+      pthread_cond_wait(&resources_under_limit, &mutex);
     available_resources++;
     if (available_resources > 0)
       pthread_cond_signal(&resources_positive);
