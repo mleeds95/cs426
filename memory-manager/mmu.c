@@ -14,16 +14,17 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdbool.h>
+#include <stdlib.h>
 
 #define SWAP_FILENAME "BACKING_STORE.bin"
 #define MEMORY_SIZE 65536
 #define TLB_SIZE 16
 #define NUMBER_PAGES 256
+#define PAGE_SIZE 256
 
 typedef struct {
   uint8_t pageNumber;
   uint8_t frameNumber;
-  bool valid;
 } TLBEntry;
 
 typedef struct {
@@ -51,11 +52,13 @@ int main(int argc, char** argv) {
     return 3;
   }
   
-  char memory[MEMORY_SIZE]; // simulated RAM
+  int8_t memory[MEMORY_SIZE]; // simulated RAM
   const PageTableEntry defaultPageTableEntry = { .valid = false };
   PageTableEntry pageTable[NUMBER_PAGES] = {defaultPageTableEntry}; // page table for the single process
-  const TLBEntry defaultTLBEntry = { .valid = false };
-  TLBEntry TLB[TLB_SIZE] = {defaultTLBEntry}; // translation lookaside buffer
+  TLBEntry TLB[TLB_SIZE]; // translation lookaside buffer (will be FIFO)
+  uint8_t tlbLength = 0; // number of TLB entries in the TLB
+  uint8_t tlbHead = 0; // index of most recent TLBEntry
+  bool freeFrames[NUMBER_PAGES] = {[0 ... NUMBER_PAGES - 1] = true}; // keep track of which frames are free
   uint64_t numberAccesses = 0; // total number of memory accesses
   uint64_t pageFaults = 0; // number of page faults
   uint64_t tlbHits = 0; // number of TLB hits
@@ -64,14 +67,47 @@ int main(int argc, char** argv) {
   char line[256]; // temporary buffer
   while (fgets(line, sizeof(line), addressFile) != NULL) {
     uint32_t logicalAddr = atoi(line);
+    // get bits 15-8 (0 is the LSB)
     uint8_t pageNumber = (logicalAddr & 0x0000FFFF) >> 8;
+    // get bits 7-0
     uint8_t pageOffset = logicalAddr & 0x000000FF;
-    printf("%d %d %d\n", logicalAddr, pageNumber, pageOffset);
-    //TODO check the TLB for pageNumber
-    //TODO check the page table for pageNumber (if necessary)
-    //TODO bring the page into memory (if necessary)
-    //TODO update the pageTable/TLB (if necessary)
-    //TODO read and print the value at the specified location
+    int frameNumber = -1; // -1 indicates unknown frame number
+    if (tlbLength > 0) { // check the TLB if it has any entries
+      for (uint8_t i = 0; i < tlbLength; ++i) {
+        if (TLB[i].pageNumber == pageNumber) {
+          frameNumber = (int)TLB[i].frameNumber;
+          ++tlbHits;
+        }
+      }
+    }
+    if (frameNumber == -1) { // if it was a TLB miss...
+      if (pageTable[pageNumber].valid) { // the page is already in memory
+        frameNumber = pageTable[pageNumber].frameNumber;
+      } else { // we need to bring the page into memory
+        ++pageFaults;
+        // find the first available frame
+        for (uint8_t i = 0; i < NUMBER_PAGES; ++i) {
+          if (freeFrames[i]) {
+            freeFrames[i] = false;
+            // copy the page from the backing store into memory
+            fseek(swapFile, pageNumber * PAGE_SIZE, SEEK_SET);
+            fread(&memory[i * PAGE_SIZE], 1, PAGE_SIZE, swapFile);
+            // update the page table and TLB
+            pageTable[pageNumber].frameNumber = i;
+            pageTable[pageNumber].valid = true;
+            frameNumber = i;
+            TLBEntry newTLBEntry = { .pageNumber = pageNumber, .frameNumber = i };
+            TLB[tlbHead] = newTLBEntry;
+            tlbHead = ++tlbHead % TLB_SIZE;
+            if (tlbLength < TLB_SIZE) ++tlbLength;
+            break;
+          } // physical memory == virtual memory, so no need to do frame replacement
+        }
+      }
+    }
+    uint16_t physicalAddr = (frameNumber * PAGE_SIZE) + pageOffset;
+    int8_t value = memory[physicalAddr];
+    printf("Virtual address: %d Physical address: %d Value: %d\n", logicalAddr, physicalAddr, value);
     numberAccesses++;
   }
 
@@ -79,10 +115,13 @@ int main(int argc, char** argv) {
   fclose(swapFile);
 
   // print page fault rate and TLB hit rate statistics
+  printf("Number of Translated Addresses = %d\n", (int)numberAccesses);
+  printf("Page Faults = %d\n", (int)pageFaults);
   double pageFaultRate = (double)pageFaults / (double)numberAccesses;
-  printf("page fault rate: %05.2f%%\n", pageFaultRate);
+  printf("Page Fault Rate: %.3f\n", (double)pageFaultRate);
+  printf("TLB Hits = %d\n", (int)tlbHits);
   double tlbHitRate = (double)tlbHits / (double)numberAccesses;
-  printf("TLB hit rate: %05.2f%%\n", tlbHitRate);
+  printf("TLB Hit Rate: %.3f\n", (double)tlbHitRate);
 
   return 0;
 }
