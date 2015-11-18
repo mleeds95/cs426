@@ -1,14 +1,14 @@
 /*
- * Matthew Leeds, CS 426, 2015-11-17, OS Concepts Ch. 9 Project 1
+ * Matthew Leeds, CS 426, 2015-11-18, OS Concepts Ch. 9 Project 1
  * This program simulates a virtual memory manager with an address
- * space of 2^16 bytes. It reads a list of logical memory addresses i
+ * space of 2^16 bytes. It reads a list of logical memory addresses
  * from a file, interpets the lower 16 bits of each as an 8 bit page 
  * number and 8 bit page offset, translates it into a physical address,
  * and reads the data at that address using a BACKING_STORE.bin file.
  * For each address, the logical addr, physical addr, and value read 
  * are outputted, and the page fault rate and TLB hit rate are printed
  * at the end.
- *
+ * Compilation: gcc -std=c99 -o mmu mmu.c
  */
 
 #include <stdio.h>
@@ -17,14 +17,16 @@
 #include <stdlib.h>
 
 #define SWAP_FILENAME "BACKING_STORE.bin"
-#define MEMORY_SIZE 65536
+#define MEMORY_SIZE 32768
 #define TLB_SIZE 16
 #define NUMBER_PAGES 256
 #define PAGE_SIZE 256
+#define NUMBER_FRAMES (MEMORY_SIZE / PAGE_SIZE)
 
 typedef struct {
   uint8_t pageNumber;
   uint8_t frameNumber;
+  bool valid;
 } TLBEntry;
 
 typedef struct {
@@ -54,11 +56,12 @@ int main(int argc, char** argv) {
   
   int8_t memory[MEMORY_SIZE]; // simulated RAM
   const PageTableEntry defaultPageTableEntry = { .valid = false };
-  PageTableEntry pageTable[NUMBER_PAGES] = {defaultPageTableEntry}; // page table for the single process
-  TLBEntry TLB[TLB_SIZE]; // translation lookaside buffer (will be FIFO)
+  PageTableEntry pageTable[NUMBER_PAGES] = { [0 ... NUMBER_PAGES - 1] = defaultPageTableEntry}; // page table for the single process
+  TLBEntry TLB[TLB_SIZE]; // translation lookaside buffer (FIFO)
   uint8_t tlbLength = 0; // number of TLB entries in the TLB
   uint8_t tlbHead = 0; // index of most recent TLBEntry
-  bool freeFrames[NUMBER_PAGES] = {[0 ... NUMBER_PAGES - 1] = true}; // keep track of which frames are free
+  bool freeFrames[NUMBER_FRAMES] = { [0 ... NUMBER_FRAMES - 1] = true}; // keep track of which frames are free
+  uint8_t nextFrame = 0; // next frame to be used (FIFO)
   uint64_t numberAccesses = 0; // total number of memory accesses
   uint64_t pageFaults = 0; // number of page faults
   uint64_t tlbHits = 0; // number of TLB hits
@@ -72,39 +75,65 @@ int main(int argc, char** argv) {
     // get bits 7-0
     uint8_t pageOffset = logicalAddr & 0x000000FF;
     int frameNumber = -1; // -1 indicates unknown frame number
-    if (tlbLength > 0) { // check the TLB if it has any entries
+
+    // check the TLB if it has any entries
+    if (tlbLength > 0) { 
       for (uint8_t i = 0; i < tlbLength; ++i) {
-        if (TLB[i].pageNumber == pageNumber) {
-          frameNumber = (int)TLB[i].frameNumber;
+        if (TLB[i].valid && TLB[i].pageNumber == pageNumber) {
           ++tlbHits;
+          frameNumber = (int)TLB[i].frameNumber;
         }
       }
     }
-    if (frameNumber == -1) { // if it was a TLB miss...
+    // check the page table if necessary
+    if (frameNumber == -1) { // a TLB miss
       if (pageTable[pageNumber].valid) { // the page is already in memory
         frameNumber = pageTable[pageNumber].frameNumber;
       } else { // we need to bring the page into memory
         ++pageFaults;
-        // find the first available frame
-        for (uint8_t i = 0; i < NUMBER_PAGES; ++i) {
-          if (freeFrames[i]) {
-            freeFrames[i] = false;
-            // copy the page from the backing store into memory
-            fseek(swapFile, pageNumber * PAGE_SIZE, SEEK_SET);
-            fread(&memory[i * PAGE_SIZE], 1, PAGE_SIZE, swapFile);
-            // update the page table and TLB
-            pageTable[pageNumber].frameNumber = i;
-            pageTable[pageNumber].valid = true;
-            frameNumber = i;
-            TLBEntry newTLBEntry = { .pageNumber = pageNumber, .frameNumber = i };
-            TLB[tlbHead] = newTLBEntry;
-            tlbHead = ++tlbHead % TLB_SIZE;
-            if (tlbLength < TLB_SIZE) ++tlbLength;
-            break;
-          } // physical memory == virtual memory, so no need to do frame replacement
+        frameNumber = nextFrame;
+        if (!freeFrames[frameNumber]) {
+          // we don't need to copy the old page to the backing store since writes are not supported
+          // invalidate frameNumber in the page table
+          for (uint8_t i = 0; i < NUMBER_PAGES; ++i) {
+            if (pageTable[i].valid && pageTable[i].frameNumber == frameNumber) {
+              pageTable[i].valid = false;
+              break;
+            }
+          }
+          // invalidate frameNumber in the TLB
+          for (uint8_t i = 0; i < tlbLength; ++i) {
+            if (TLB[i].valid && TLB[i].frameNumber == frameNumber) {
+              TLB[i].valid = false;
+              break;
+            }
+          }
+        } else {
+          freeFrames[frameNumber] = false;
         }
+
+        // copy the page from the backing store into memory
+        fseek(swapFile, pageNumber * PAGE_SIZE, SEEK_SET);
+        fread(&memory[frameNumber * PAGE_SIZE], 1, PAGE_SIZE, swapFile);
+
+        // update the page table
+        pageTable[pageNumber].frameNumber = frameNumber;
+        pageTable[pageNumber].valid = true;
+
+        // update the TLB
+        TLBEntry newTLBEntry = { .pageNumber = pageNumber,
+                                 .frameNumber = frameNumber,
+                                 .valid = true };
+        TLB[tlbHead] = newTLBEntry;
+
+        // update tlbHead, tlbLength, and nextFrame
+        tlbHead = ++tlbHead % TLB_SIZE; // FIFO TLB entry replacement
+        if (tlbLength < TLB_SIZE) ++tlbLength;
+        nextFrame = ++nextFrame % NUMBER_FRAMES; // FIFO frame replacement
       }
     }
+
+    // read the desired value from memory
     uint16_t physicalAddr = (frameNumber * PAGE_SIZE) + pageOffset;
     int8_t value = memory[physicalAddr];
     printf("Virtual address: %d Physical address: %d Value: %d\n", logicalAddr, physicalAddr, value);
