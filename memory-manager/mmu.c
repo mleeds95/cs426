@@ -17,11 +17,11 @@
 #include <stdlib.h>
 
 #define SWAP_FILENAME "BACKING_STORE.bin"
-#define MEMORY_SIZE 32768
 #define TLB_SIZE 16
 #define NUMBER_PAGES 256
 #define PAGE_SIZE 256
 #define NUMBER_FRAMES (MEMORY_SIZE / PAGE_SIZE)
+// MEMORY_SIZE will be defined at runtime
 
 typedef struct {
   uint8_t pageNumber;
@@ -39,6 +39,17 @@ int main(int argc, char** argv) {
     fprintf(stderr, "Usage: ./mmu <filename>\n");
     return 1;
   }
+
+  // prompt the user for which physical memory size they want to simulate
+  char userInput[2] = {'0', '\0'};
+  while (userInput[0] != '1' && userInput[0] != '2') {
+    printf("Enter 1 for a physical address space of 2^16 bytes or 2 for 2^15 bytes:");
+    fflush(stdout);
+    fgets(userInput, 2, stdin);
+  }
+  unsigned int MEMORY_SIZE = 0;
+  if (userInput[0] == '1') MEMORY_SIZE = 65536;
+  if (userInput[0] == '2') MEMORY_SIZE = 32768;
 
   // open the memory stored on disk (swap space)
   FILE* swapFile = fopen(SWAP_FILENAME, "r");
@@ -60,8 +71,11 @@ int main(int argc, char** argv) {
   TLBEntry TLB[TLB_SIZE]; // translation lookaside buffer (FIFO)
   uint8_t tlbLength = 0; // number of TLB entries in the TLB
   uint8_t tlbHead = 0; // index of most recent TLBEntry
-  bool freeFrames[NUMBER_FRAMES] = { [0 ... NUMBER_FRAMES - 1] = true}; // keep track of which frames are free
-  uint8_t nextFrame = 0; // next frame to be used (FIFO)
+  bool freeFrames[NUMBER_FRAMES]; // keep track of which frames are free
+  for (unsigned int i = 0; i < NUMBER_FRAMES; ++i) {
+    freeFrames[i] = true;
+  }
+  unsigned int nextFrame = 0; // next frame to be used (FIFO)
   uint64_t numberAccesses = 0; // total number of memory accesses
   uint64_t pageFaults = 0; // number of page faults
   uint64_t tlbHits = 0; // number of TLB hits
@@ -75,7 +89,6 @@ int main(int argc, char** argv) {
     // get bits 7-0
     uint8_t pageOffset = logicalAddr & 0x000000FF;
     int frameNumber = -1; // -1 indicates unknown frame number
-
     // check the TLB if it has any entries
     if (tlbLength > 0) { 
       for (uint8_t i = 0; i < tlbLength; ++i) {
